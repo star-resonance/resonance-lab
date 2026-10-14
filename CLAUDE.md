@@ -94,3 +94,7 @@ The training data comes from the app (`dataset_<CHANNEL>.jsonl`: `pid`, `origina
 - Chat logs and datasets (`data/**`, `lora_dataset/`), weights (`*.safetensors`,
   `*.gguf`, `model_f16*/`, `outputs/`), `llama.cpp/`, `unsloth_compiled_cache/`.
 - `graft/` (regenerable), `__pycache__/`, virtualenvs, IDE folders.
+
+## Overrides of global rules
+
+None.
