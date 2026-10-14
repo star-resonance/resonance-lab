@@ -3,7 +3,7 @@
 ```
 .claude/              skills/: workflow-control, season-data (the runbook for labelling + translating a season's chat with agents)
 .memory/              working memory; see .memory/README.md
-.github/workflows/    CI (data gate) + auto-merge
+.github/workflows/    CI (data gate), auto-merge, actionlint (workflow PRs), Project sync and snapshot
 justfile              the gates as commands
 config.py             every path and hyper-parameter; INSTRUCTION (system prompt)
 eval_metrics.py       shared eval scoring + report (chrF/BLEU/TER, COMET, JP/think leakage, terms); tested
