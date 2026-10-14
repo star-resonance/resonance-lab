@@ -16,12 +16,19 @@ on:
   # GITHUB_TOKEN start no push run).
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   data:
     name: lint + data gate (Linux)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
