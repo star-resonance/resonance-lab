@@ -1,6 +1,6 @@
 # Gate tooling for the data part (CLAUDE.md). CPU only -- no torch, no CUDA.
 pytest==8.4.2
-ruff==0.13.3
+ruff==0.17.0
 pyyaml==6.0.3
 rich==15.0.0
 sacrebleu==2.6.0
