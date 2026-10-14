@@ -37,7 +37,7 @@ jobs:
       # CPU-only gate tooling; the model part (torch, unsloth, CUDA) is not installed here. Its only
       # CI check is the mock pipeline run inside `just check` (tests/mock_gpu/) -- see CLAUDE.md.
       - run: pip install -r requirements-dev.txt
-      - uses: extractions/setup-just@v2
+      - uses: extractions/setup-just@v4
       - run: just check
 
   secrets:
