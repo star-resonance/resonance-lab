@@ -49,9 +49,9 @@ The training data comes from the app (`dataset_<CHANNEL>.jsonl`: `pid`, `origina
 - **Conventions** (where paths live, stage exit codes, how scripts import `config`, adding a
   pipeline): `.claude/rules/conventions.md`; loads when Python files, tests or `pyproject.toml` are touched.
 - **State** is the organization Project "Resonance" (star-resonance): read
-  `git fetch origin status && git show origin/status:STATUS.md` (a snapshot 3 times a day; run
-  `project-snapshot.yml` for a fresh one). No `MEMORY.md`, no handoff files; `.memory/` stays the
-  detail store.
+  `git fetch origin status && git show origin/status:STATUS.md` (refreshed a minute after each `cmd:` label or date;
+  a Start or Target date: `gh workflow run project-set.yml -f issue=N -f field=Target -f date=YYYY-MM-DD` or `date=clear`).
+  No `MEMORY.md`, no handoff files; `.memory/` stays the detail store.
 - **Repository layout** (what every file is for): `docs/repository-layout.md`; not loaded
   automatically, read it when you need to find a file.
 
