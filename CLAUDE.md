@@ -80,12 +80,12 @@ The training data comes from the app (`dataset_<CHANNEL>.jsonl`: `pid`, `origina
 
 ## Version Control
 
-- `.github/workflows/auto-merge.yml` (not GitHub auto-merge) merges the PR and deletes its
-  `claude/*` branch (never any other branch) once the CI workflow passes on the PR's latest
-  commit. If CI fails, fix on the same branch and push again: the run for the new commit decides.
-- Only `claude/*` PRs into `main` auto-merge; a draft, a PR that changes `.github/workflows/`, or
-  a Dependabot PR (`.github/dependabot.yml`) waits for Kade. `workflow_run` workflows are read
-  from `main`, so a change to `auto-merge.yml` itself takes effect after it has been merged once.
+- `.github/workflows/auto-merge.yml` (not GitHub auto-merge) merges the PR, deletes its `claude/*`
+  branch and closes the issues it closes, once every check on its latest commit is green (else fix
+  on the same branch and push: the new commit's run decides). It, `branch-cleanup`, `eol-check` and
+  `claude-md-check` call star-resonance/.github's shared workflows; `workflow_run` is read from `main`.
+- Only `claude/*` PRs into `main` auto-merge; a draft, a PR that changes `.github/workflows/`,
+  `CLAUDE.md` or `.claude/rules/` (open those as drafts), or a Dependabot PR waits for Kade.
 - Local sessions follow the same flow: a `claude/<task>` branch and a PR, opened with Kade's
   `gh` login (without it, print the commands for Kade).
 - Only a green local gate is pushed.
