@@ -9,8 +9,14 @@ over either client (judge_client.SystemOneClient or judge_local.LocalKevClient);
 import json
 import os
 import re
+import sys
+from typing import NamedTuple
 
-from dataset_recipe import line_rank, load_recipe, recipe_path, select_lines
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+from dataset_recipe import UNCATEGORIZED, RecipeError, line_key, line_rank, load_recipe, recipe_path, select_lines
+from overlap import EvalOverlap
+from preprocess import PAIR_VAL_FRACTION, row_outcomes
+from valsplit import is_validation
 
 UNGUESSED = "?"  # the draft's label for a line the judge gave no answer for: not a category, so read_sample refuses it until a human labels the line
 
@@ -119,6 +125,85 @@ def format_recipe_preview(preview, name):
         mark = "  <- limits the dataset" if row["key"] == preview["limited_by"] else ""
         lines.append(f"  {row['key']:<16}{row['share']:>8.0%}{row['natural']:>9.0%}{row['available']:>11,}{row['target']:>10,}{mark}")
     lines.append(f"  {preview['uncategorized']:,} lines have no category (uncertain or unjudged), {preview['outside']:,} are in a category the recipe does not name.")
+    return "\n".join(lines)
+
+
+# --- the training side: the lines preprocess.py would actually train on ---------------------------------------------
+
+
+class TrainSide(NamedTuple):
+    lines: dict  # line key -> category, for every distinct line with Japanese text (no entry in the categories file: uncategorized)
+    usable: frozenset  # keys of the lines on the training side: they pass preprocess's filters and are not validation lines
+    pending: frozenset  # keys of the lines with no Korean yet (translated null or empty) and no translated occurrence
+    keep: tuple  # the filters let through while reading (a recipe's `keep`): the preview refuses a recipe with another
+
+
+def train_side(raw_path, categories, eval_originals=(), val_fraction=PAIR_VAL_FRACTION, keep=()):
+    """The lines of the raw log that a recipe would choose from: preprocess's own filters (row_outcomes), then the validation
+    split, which does not depend on the recipe. `categories` is {line key: category}; `val_fraction` and `eval_originals`
+    must be the ones preprocess.py runs with (its defaults: 0.05 for the pair format, the eval set's lines)."""
+    lines, usable, untranslated, with_korean = {}, set(), set(), set()
+    with open(raw_path, encoding="utf-8") as f:
+        for original, translated, reason in row_outcomes(f, EvalOverlap(eval_originals), set(), keep):
+            if not original:
+                continue
+            key = line_key(original)
+            lines.setdefault(key, categories.get(key, UNCATEGORIZED))
+            (with_korean if translated else untranslated).add(key)
+            if reason is None and not is_validation(original, val_fraction):
+                usable.add(key)
+    return TrainSide(lines, frozenset(usable), frozenset(untranslated - with_korean), tuple(keep))
+
+
+def category_overview(side):
+    """Per category of the lines: the distinct lines, those on the training side, their natural share of the training side, and
+    the lines still waiting for a Korean translation. Most usable first."""
+    usable_total = len(side.usable)
+    rows = {}
+    for key, category in side.lines.items():
+        row = rows.setdefault(category, {"category": category, "lines": 0, "usable": 0, "natural": 0.0, "pending": 0})
+        row["lines"] += 1
+        row["usable"] += key in side.usable
+        row["pending"] += key in side.pending
+    for row in rows.values():
+        row["natural"] = row["usable"] / usable_total if usable_total else 0.0
+    return sorted(rows.values(), key=lambda row: (-row["usable"], row["category"]))
+
+
+def format_category_overview(rows):
+    lines = [f"--- The training side by category: {sum(row['usable'] for row in rows):,} usable lines ---",
+             f"  {'category':<24}{'lines':>9}{'usable':>9}{'natural':>9}{'pending':>9}"]
+    for row in rows:
+        lines.append(f"  {row['category']:<24}{row['lines']:>9,}{row['usable']:>9,}{row['natural']:>9.0%}{row['pending']:>9,}")
+    lines.append("  usable = passes preprocess's filters and is not a validation line; pending = no Korean yet (not usable until translated).")
+    return "\n".join(lines)
+
+
+def train_side_preview(recipe, side):
+    """What `recipe` selects from the training side: exactly what `preprocess.py --recipe` would select from the same log with the
+    same categories file (same filters, validation split, keep and allocation), per recipe key."""
+    if tuple(recipe.keep) != side.keep:
+        raise RecipeError(f"the recipe keeps {list(recipe.keep)} but the lines were read with keep={list(side.keep)}: "
+                          f"read them again with train_side(..., keep={tuple(recipe.keep)!r})")
+    selection = select_lines(recipe, [(key, side.lines[key]) for key in side.usable])
+    covered = sum(selection.available.values())
+    shares = recipe.shares
+    rows = [{"key": key, "share": float(shares[key]), "natural": selection.available[key] / covered if covered else 0.0,
+             "available": selection.available[key], "target": selection.allocation.targets[key]}
+            for key in sorted(recipe.weights, key=lambda key: (-shares[key], key))]
+    return {"rows": rows, "total": selection.allocation.total, "limited_by": selection.allocation.limited_by,
+            "requested": selection.allocation.requested, "usable": len(side.usable), "outside": len(side.usable) - covered}
+
+
+def format_train_side_preview(preview, name):
+    lines = [f"--- Recipe {name} on {preview['usable']:,} usable lines: would select {preview['total']:,} ---",
+             f"  {'category':<24}{'recipe':>8}{'natural':>9}{'available':>11}{'selected':>10}"]
+    for row in preview["rows"]:
+        mark = "  <- limits the dataset" if row["key"] == preview["limited_by"] else ""
+        lines.append(f"  {row['key']:<24}{row['share']:>8.0%}{row['natural']:>9.0%}{row['available']:>11,}{row['target']:>10,}{mark}")
+    outside = preview["outside"]
+    lines.append(f"  {outside:,} usable line{'' if outside == 1 else 's'} {'is' if outside == 1 else 'are'} in a category the recipe does not name"
+                 " (left out).")
     return "\n".join(lines)
 
 

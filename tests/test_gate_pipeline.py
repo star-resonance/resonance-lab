@@ -229,6 +229,8 @@ def test_a_line_that_is_translated_once_is_not_pending(write_jsonl):
     side = gate_pipeline.train_side(raw, {}, val_fraction=0.0)
 
     assert side.pending == frozenset() and side.usable == frozenset({line_key("ありがとう")})
+    on_the_validation_side = gate_pipeline.train_side(raw, {}, val_fraction=0.999)
+    assert on_the_validation_side.usable == frozenset() and on_the_validation_side.pending == frozenset()
 
 
 def test_the_overview_counts_each_category_with_its_natural_share_and_pending_lines(write_jsonl):
