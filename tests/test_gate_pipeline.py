@@ -187,6 +187,108 @@ def test_the_preview_is_text_with_a_marker_for_the_limiting_category():
     assert "balanced-v1" in text and "social" in text and "limits" in text
 
 
+# --- the training side: what preprocess.py would actually train on ------------------------------------------------------
+
+
+def raw_rows(**translated_by_original):
+    return [{"original": original, "translated": translated} for original, translated in translated_by_original.items()]
+
+
+def test_the_training_side_holds_only_the_lines_that_pass_preprocess_filters(write_jsonl):
+    raw = write_jsonl("raw.jsonl", [
+        {"original": "おはよう", "translated": "좋은 아침"},
+        {"original": "おはよう", "translated": "안녕"},  # duplicate: the first occurrence wins
+        {"original": "ログイン", "translated": None},  # no Korean yet
+        {"original": "한국어", "translated": "한국어"},  # Hangeul in the source
+        {"original": "スカイ", "translated": "스카이"},  # an eval line
+        "{broken",
+    ])
+
+    side = gate_pipeline.train_side(raw, {}, eval_originals=["スカイ"], val_fraction=0.0)
+
+    assert side.usable == frozenset({line_key("おはよう")})
+    assert side.pending == frozenset({line_key("ログイン")})
+    assert side.lines[line_key("おはよう")] == "uncategorized"  # no entry in the categories file: preprocess's default
+
+
+def test_validation_lines_are_not_on_the_training_side(write_jsonl):
+    from valsplit import is_validation
+
+    originals = [f"テスト{i}" for i in range(40)]
+    raw = write_jsonl("raw.jsonl", [{"original": text, "translated": f"테스트{i}"} for i, text in enumerate(originals)])
+
+    side = gate_pipeline.train_side(raw, {}, val_fraction=0.3)
+
+    validation = {line_key(text) for text in originals if is_validation(text, 0.3)}
+    assert validation and side.usable == frozenset(line_key(text) for text in originals) - validation
+
+
+def test_a_line_that_is_translated_once_is_not_pending(write_jsonl):
+    raw = write_jsonl("raw.jsonl", [{"original": "ありがとう", "translated": None}, {"original": "ありがとう", "translated": "고마워"}])
+
+    side = gate_pipeline.train_side(raw, {}, val_fraction=0.0)
+
+    assert side.pending == frozenset() and side.usable == frozenset({line_key("ありがとう")})
+
+
+def test_the_overview_counts_each_category_with_its_natural_share_and_pending_lines(write_jsonl):
+    raw = write_jsonl("raw.jsonl", [
+        *[{"original": f"挨拶{i}", "translated": f"인사{i}"} for i in range(3)],
+        {"original": "挨拶まだ", "translated": None},
+        {"original": "雑談", "translated": "잡담"},
+    ])
+    categories = {**{line_key(f"挨拶{i}"): "social/greeting" for i in range(3)}, line_key("挨拶まだ"): "social/greeting"}
+
+    rows = {row["category"]: row for row in gate_pipeline.category_overview(gate_pipeline.train_side(raw, categories, val_fraction=0.0))}
+
+    assert rows["social/greeting"] == {"category": "social/greeting", "lines": 4, "usable": 3, "natural": pytest.approx(0.75), "pending": 1}
+    assert rows["uncategorized"]["usable"] == 1 and rows["uncategorized"]["natural"] == pytest.approx(0.25)
+
+
+def test_the_training_side_preview_selects_exactly_what_preprocess_selects(write_jsonl, tmp_path):
+    import preprocess
+
+    rows = [{"original": f"挨拶{i}", "translated": f"인사{i}"} for i in range(30)] + \
+           [{"original": f"募集{i}", "translated": f"모집{i}"} for i in range(9)] + \
+           [{"original": f"雑談{i}", "translated": f"잡담{i}"} for i in range(12)] + \
+           [{"original": "ID:1 " + "あ" * 150 + " ID:2", "translated": "모집 벽"}]  # a recruitment wall: kept by the recipe
+    raw = write_jsonl("raw.jsonl", rows)
+    categories = {**{line_key(f"挨拶{i}"): "social" for i in range(30)}, **{line_key(f"募集{i}"): "recruitment/party" for i in range(9)},
+                  line_key(rows[-1]["original"]): "spam/wall"}
+    chosen = Recipe(seed=3, total=None, keep=("recruitment spam",),
+                    weights={"social": Fraction(2), "recruitment": Fraction(1), "uncategorized": Fraction(1), "spam": Fraction(1, 10)})
+    report = {}
+    preprocess.transform_for_lora(raw, str(tmp_path / "out.jsonl"), fmt="pair", val_file=str(tmp_path / "val.jsonl"), val_fraction=0.2,
+                                  recipe=chosen, categories=categories, recipe_report=report)
+
+    preview = gate_pipeline.train_side_preview(chosen, gate_pipeline.train_side(raw, categories, val_fraction=0.2, keep=chosen.keep))
+
+    assert {row["key"]: row["target"] for row in preview["rows"]} == report["targets"]
+    assert {row["key"]: row["available"] for row in preview["rows"]} == report["available"]
+    assert (preview["total"], preview["limited_by"]) == (report["total"], report["limited_by"])
+
+
+def test_the_preview_refuses_lines_read_with_another_keep_than_the_recipes(write_jsonl):
+    raw = write_jsonl("raw.jsonl", [{"original": "おはよう", "translated": "좋은 아침"}])
+    side = gate_pipeline.train_side(raw, {}, val_fraction=0.0)
+
+    with pytest.raises(RecipeError, match="recruitment spam"):
+        gate_pipeline.train_side_preview(Recipe(seed=1, total=None, keep=("recruitment spam",), weights={"social": Fraction(1)}), side)
+
+
+def test_the_training_side_preview_is_text_with_the_limit_and_what_falls_outside(write_jsonl):
+    raw = write_jsonl("raw.jsonl", raw_rows(**{"挨拶": "인사", "雑談": "잡담", "募集": "모집"}))
+    side = gate_pipeline.train_side(raw, {line_key("挨拶"): "social", line_key("雑談"): "chat"}, val_fraction=0.0)
+
+    preview = gate_pipeline.train_side_preview(recipe(social=1, chat=1), side)
+    text = gate_pipeline.format_train_side_preview(preview, "my-mix")
+
+    assert preview["outside"] == 1 and preview["usable"] == 3
+    assert "my-mix" in text and "would select 2" in text and "1 usable line is in a category the recipe does not name" in text
+    overview = gate_pipeline.format_category_overview(gate_pipeline.category_overview(side))
+    assert "social" in overview and "pending" in overview
+
+
 # --- the decision text -----------------------------------------------------------------------------------
 
 
