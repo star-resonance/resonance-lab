@@ -687,6 +687,18 @@ def test_without_a_recipe_the_output_is_exactly_what_it_was_before_recipes_exist
     assert manifest.file_sha256(str(val)) == "fde8995a9bbd13bfe49cad1a9996c6bbafe8f2e27df5d25a0839596171933eb8"
 
 
+def test_the_training_and_validation_files_end_lines_with_lf_on_every_os(write_jsonl, tmp_path):
+    # Their sha256 goes into the manifest and MLflow: a CRLF file on Windows would hash differently from Linux.
+    src = write_jsonl("raw.jsonl", [{"original": f"行{i}", "translated": f"줄{i}"} for i in range(10)])
+    out, val = tmp_path / "out.jsonl", tmp_path / "val.jsonl"
+
+    preprocess.transform_for_lora(src, str(out), fmt="pair", val_file=str(val), val_fraction=0.3)
+
+    for path in (out, val):
+        data = path.read_bytes()
+        assert data.count(b"\n") > 0 and b"\r" not in data, path.name
+
+
 # --- keep: a recipe can let recruitment walls through ---------------------------------------------------------------
 
 WALL = "ID:1 " + "あ" * 150 + " ID:2"
