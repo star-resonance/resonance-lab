@@ -205,6 +205,9 @@ def format_train_side_preview(preview, name):
     outside = preview["outside"]
     lines.append(f"  {outside:,} usable line{'' if outside == 1 else 's'} {'is' if outside == 1 else 'are'} in a category the recipe does not name"
                  " (left out).")
+    if not preview["total"] and preview["limited_by"]:
+        lines.append(f"  The recipe selects nothing: '{preview['limited_by']}' has no usable lines, so preprocess.py would stop. "
+                     "Remove it from the recipe, or categorise lines into it first.")
     return "\n".join(lines)
 
 
