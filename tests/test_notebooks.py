@@ -134,3 +134,24 @@ def test_the_gate_notebook_asks_the_question_of_its_prompt_variant():
     assert "judge_prompts.judge_question(" in text and "GateJudge(client, OPTIONS, CUTOFF, INSTRUCTIONS)" in text
     assert "gate_judge.INSTRUCTIONS" not in text, "the question comes from the variant, never from the default constant"
     assert 'notes=f"prompt {JUDGE_PROMPT}"' in text
+
+
+def test_the_gate_notebook_previews_the_training_side_and_saves_a_recipe_only_when_asked():
+    """The recipe numbers come from the lines preprocess would train on; a chosen mix becomes a file only behind a switch that is off."""
+    cells = source(GATE_NOTEBOOK)
+    text = "\n".join(cells)
+    assert "gate_pipeline.train_side(" in text and "gate_pipeline.train_side_preview(" in text
+    assert "recipe_preview_by_name(" not in text, "the preview of every distinct line is an upper bound: the notebook shows the training side"
+    assert "SAVE_RECIPE = False" in text
+    (save_cell,) = [cell for cell in cells if "gate_pipeline.save_recipe(" in cell]
+    assert "if SAVE_RECIPE:" in save_cell.split("gate_pipeline.save_recipe(")[0]
+    assert "gate_pipeline.choose_recipe(" in save_cell
+
+
+def test_the_parameter_notebook_trains_on_its_recipe_and_runs_the_recipes_data_stages():
+    notebook = os.path.join(BASE_DIR, "notebooks", "parameter_test.ipynb")
+    cells = source(notebook)
+    text = "\n".join(cells)
+    assert "RECIPE = None" in text and "recipe=RECIPE" in text
+    (data_cell,) = [cell for cell in cells if "pt.run_command(COMMANDS[name])" in cell]
+    assert "pt.DATA_STAGES if name in COMMANDS" in data_cell, "a recipe adds data stages without REFRESH_DATA: run what the lifecycle has"
