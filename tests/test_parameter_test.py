@@ -90,6 +90,41 @@ def test_refreshing_the_data_puts_its_stages_first_each_through_run_pipeline():
         assert command.argv == ["PY", script("run_pipeline.py"), "--model", "hy-mt2-1.8b", "--fast", "--only", stage]
 
 
+def test_a_recipe_rebuilds_the_training_file_with_it_before_training():
+    commands = pt.lifecycle(pt.ParamSet(model="hy-mt2-1.8b", recipe="balanced-v1"), python="PY")
+    assert [c.name for c in commands][:3] == ["Preprocessing", "Update Dataset", "Fine-Tuning"]
+    for command in commands[:2]:
+        assert command.argv == ["PY", script("run_pipeline.py"), "--model", "hy-mt2-1.8b", "--fast", "--only", command.name,
+                                "--recipe", "balanced-v1"]
+
+
+def test_a_recipe_with_refreshed_data_runs_every_data_stage_once_with_the_recipe():
+    commands = pt.lifecycle(pt.ParamSet(recipe="balanced-v1"), refresh_data=True, python="PY")
+    assert [c.name for c in commands][:5] == [*pt.DATA_STAGES, "Fine-Tuning"]
+    assert all(c.argv[-2:] == ["--recipe", "balanced-v1"] for c in commands[:4])
+
+
+def test_the_label_names_the_recipe():
+    assert pt.ParamSet(lr=4e-4, recipe="balanced-v1").label() == "lr=0.0004 recipe=balanced-v1"
+    assert pt.ParamSet(recipe="balanced-v1").label() == "recipe=balanced-v1"
+
+
+def test_a_recipe_that_is_not_in_the_repo_is_refused_before_anything_runs():
+    with pytest.raises(ValueError, match="no-such-mix"):
+        pt.ParamSet(recipe="no-such-mix").validate()
+    with pytest.raises(ValueError, match="not a recipe name"):
+        pt.ParamSet(recipe="../balanced-v1").validate()
+
+
+def test_a_sweep_over_recipes_gives_every_set_a_recipe():
+    sets = pt.sweep_params(pt.ParamSet(), [{"recipe": "balanced-v1"}, {"recipe": "balanced-v1-detailed"}])
+    assert [s.recipe for s in sets] == ["balanced-v1", "balanced-v1-detailed"]
+    # a set without one would train on whatever file the set before it left: refused
+    with pytest.raises(ValueError, match="recipe"):
+        pt.sweep_params(pt.ParamSet(), [{"recipe": "balanced-v1"}, {"lr": 4e-4}])
+    assert [s.recipe for s in pt.sweep_params(pt.ParamSet(recipe="balanced-v1"), [{"lr": 4e-4}, {"lr": 8e-4}])] == ["balanced-v1"] * 2
+
+
 def test_data_stages_are_the_first_four_of_the_default_pipeline():
     assert pt.DATA_STAGES == [s.name for s in pipelines.stages(pipelines.DEFAULT)[:4]]
     # run_pipeline's --only takes a name or a unique prefix, so each one must select exactly its own stage
