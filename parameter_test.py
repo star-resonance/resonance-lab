@@ -21,11 +21,13 @@ from typing import NamedTuple
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "llamafactory"))
 import pipelines
 from config import BASE_DIR, EVAL_OUTPUT_DIR
+from dataset_recipe import load_recipe, recipe_path
 from lf_tools import load_profile, model_name, train_config, training_overrides
 from runs import latest_run, read_run
 
 EVAL_PROMPTS = ("training", "chat-template")  # the choices of scripts/llamafactory/eval.py --prompt (a test checks it)
 DATA_STAGES = [stage.name for stage in pipelines.stages(pipelines.DEFAULT)[:4]]  # Fetch Data .. Update Dataset
+RECIPE_STAGES = DATA_STAGES[2:]  # Preprocessing, Update Dataset: what a recipe changes (it chooses the lines of the training file)
 TRAINER_LOG = "trainer_log.jsonl"
 
 
@@ -34,13 +36,15 @@ TRAINER_LOG = "trainer_log.jsonl"
 @dataclasses.dataclass(frozen=True)
 class ParamSet:
     """One parameter test. `model` None = $RESONANCE_LF_PROFILE / the default; `lr` / `epochs` None = the profile's own
-    (only these two can be overridden for now: lf_tools.training_overrides)."""
+    (only these two can be overridden for now: lf_tools.training_overrides). `recipe` (a name in configs/datasets/) rebuilds the
+    training file with that dataset recipe before training; None = train on the file as it is."""
 
     model: str | None = None
     fast: bool = True
     lr: float | None = None
     epochs: float | None = None
     prompts: tuple = ("training",)
+    recipe: str | None = None
 
     @property
     def profile(self):
@@ -48,6 +52,7 @@ class ParamSet:
 
     def label(self):
         parts = [f"{name}={value:g}" for name, value in (("lr", self.lr), ("epochs", self.epochs)) if value is not None]
+        parts += [f"recipe={self.recipe}"] if self.recipe is not None else []
         return " ".join(parts) or "profile defaults"
 
     def validate(self):
@@ -57,6 +62,8 @@ class ParamSet:
         for prompt in self.prompts:
             if prompt not in EVAL_PROMPTS:
                 raise ValueError(f"unknown eval prompt {prompt!r}; choose from: {', '.join(EVAL_PROMPTS)}")
+        if self.recipe is not None:
+            load_recipe(recipe_path(self.recipe))  # RecipeError (a ValueError) naming the file when it is missing or unusable
 
 
 def sweep_params(defaults, entries):
@@ -71,6 +78,9 @@ def sweep_params(defaults, entries):
         params = dataclasses.replace(defaults, **entry)
         params.validate()
         sets.append(params)
+    if len({params.recipe is None for params in sets}) > 1:
+        raise ValueError("some sets of the sweep have a recipe and others none: a set without one would train on the file the set "
+                         "before it left. Give every set a recipe (or set one in the defaults), or none.")
     return sets
 
 
@@ -86,14 +96,16 @@ def _model_arguments(params):
 
 
 def lifecycle(params, refresh_data=False, python=None):
-    """The commands of one parameter test, in order: [the data stages,] train, merge, one eval per prompt. Each is a
+    """The commands of one parameter test, in order: [the data stages (all with `refresh_data`, Preprocessing and Update Dataset with
+    a recipe),] train, merge, one eval per prompt. Each is a
     script of the repo run with `python` (the notebook's own interpreter: the project venv), from the repo root."""
     python = python or sys.executable
     model = _model_arguments(params)
     scripts = os.path.join(BASE_DIR, "scripts", "llamafactory")
     commands = []
-    if refresh_data:
-        commands += [Command(stage, [python, os.path.join(BASE_DIR, "run_pipeline.py"), *model, "--only", stage]) for stage in DATA_STAGES]
+    recipe = ["--recipe", params.recipe] if params.recipe is not None else []
+    data = DATA_STAGES if refresh_data else RECIPE_STAGES if recipe else []
+    commands += [Command(stage, [python, os.path.join(BASE_DIR, "run_pipeline.py"), *model, "--only", stage, *recipe]) for stage in data]
     train = [python, os.path.join(scripts, "train.py"), *model]
     if params.lr is not None:
         train += ["--lr", repr(float(params.lr))]

@@ -49,6 +49,8 @@ FORMATS = {
     "pair": lambda original, translated: {"original": original, "translated": translated},
 }
 DEFAULT_FORMAT = "instruction"
+# The share of the lines written to the validation file for the pair format, unless --val-fraction says otherwise.
+PAIR_VAL_FRACTION = 0.05
 
 
 def forward_row(original, translated, style=None):
@@ -100,6 +102,35 @@ def clean_reason(original, translated, direction="ja-ko", keep=()):
     if len(original) > 150 and original.count('ID:') > 1 and "recruitment spam" not in keep:
         return "recruitment spam"
     return None
+
+
+def row_outcomes(lines, eval_overlap, seen, keep=()):
+    """(original, translated, reason) of each raw JSONL line, in order: reason is None when the ja->ko row passes every
+    filter, else why it is dropped (`clean_reason`, then "eval overlap" / "eval overlap (near)", "duplicate", or
+    "json error" with original and translated None).
+
+    `seen` is the set of inputs already taken (the duplicate check): a passed original is added to it before it is
+    yielded, and the caller may add to it too (the reverse rows' Korean inputs share it).
+    """
+    for line in lines:
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            yield None, None, "json error"
+            continue
+        original = (data.get("original") or "").strip()
+        translated = (data.get("translated") or "").strip()
+
+        reason = clean_reason(original, translated, keep=keep)
+        if reason is None:
+            found = eval_overlap.check(original)
+            if found:
+                reason = "eval overlap" if found == "exact" else "eval overlap (near)"
+        if reason is None and original in seen:
+            reason = "duplicate"  # the first occurrence wins
+        if reason is None:
+            seen.add(original)
+        yield original, translated, reason
 
 
 def _report(counts):
@@ -195,30 +226,17 @@ def transform_for_lora(input_file, output_file, fmt=DEFAULT_FORMAT, style=None, 
         f_in = files.enter_context(open(input_file, 'r', encoding='utf-8'))
         f_out = files.enter_context(open(output_file, 'w', encoding='utf-8'))
         f_val = files.enter_context(open(val_file, 'w', encoding='utf-8')) if val_file else None
-        for line in f_in:
+        for original, translated, reason in row_outcomes(f_in, eval_overlap, seen_inputs, keep):
             counts["total"] += 1
-            try:
-                data = json.loads(line)
-            except json.JSONDecodeError:
-                counts["json error"] += 1
+            if reason == "json error":
+                counts[reason] += 1
                 continue
-            original = (data.get("original") or "").strip()
-            translated = (data.get("translated") or "").strip()
-
-            reason = clean_reason(original, translated, keep=keep)
-            if reason is None:
-                found = eval_overlap.check(original)
-                if found:
-                    reason = "eval overlap" if found == "exact" else "eval overlap (near)"
-            if reason is None and original in seen_inputs:
-                reason = "duplicate"  # the first occurrence wins
             usable += reason not in EXPECTED
             suspicious += reason in SUSPICIOUS
             if reason:
                 counts[reason] += 1
                 continue
 
-            seen_inputs.add(original)
             counts["passed"] += 1
             # The pair's side is decided by its Japanese line, so the reverse row follows the forward row.
             sink = f_val if f_val and is_validation(original, val_fraction) else f_out
@@ -299,7 +317,7 @@ def main(argv=None):
     style = {"none": None, "auto": None}.get(args.prompt, args.prompt)
     if args.prompt == "auto":
         style = style_for_template(_profile_template(args.model))
-    val_fraction = (0.05 if args.fmt == "pair" else 0.0) if args.val_fraction is None else args.val_fraction
+    val_fraction = (PAIR_VAL_FRACTION if args.fmt == "pair" else 0.0) if args.val_fraction is None else args.val_fraction
     if not 0 <= val_fraction < 1:
         parser.error("--val-fraction must be at least 0 and below 1")
     eval_set, eval_originals = _eval_originals(args)

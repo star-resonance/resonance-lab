@@ -187,6 +187,169 @@ def test_the_preview_is_text_with_a_marker_for_the_limiting_category():
     assert "balanced-v1" in text and "social" in text and "limits" in text
 
 
+# --- the training side: what preprocess.py would actually train on ------------------------------------------------------
+
+
+def raw_rows(**translated_by_original):
+    return [{"original": original, "translated": translated} for original, translated in translated_by_original.items()]
+
+
+def test_the_training_side_holds_only_the_lines_that_pass_preprocess_filters(write_jsonl):
+    raw = write_jsonl("raw.jsonl", [
+        {"original": "おはよう", "translated": "좋은 아침"},
+        {"original": "おはよう", "translated": "안녕"},  # duplicate: the first occurrence wins
+        {"original": "ログイン", "translated": None},  # no Korean yet
+        {"original": "한국어", "translated": "한국어"},  # Hangeul in the source
+        {"original": "スカイ", "translated": "스카이"},  # an eval line
+        "{broken",
+    ])
+
+    side = gate_pipeline.train_side(raw, {}, eval_originals=["スカイ"], val_fraction=0.0)
+
+    assert side.usable == frozenset({line_key("おはよう")})
+    assert side.pending == frozenset({line_key("ログイン")})
+    assert side.lines[line_key("おはよう")] == "uncategorized"  # no entry in the categories file: preprocess's default
+
+
+def test_validation_lines_are_not_on_the_training_side(write_jsonl):
+    from valsplit import is_validation
+
+    originals = [f"テスト{i}" for i in range(40)]
+    raw = write_jsonl("raw.jsonl", [{"original": text, "translated": f"테스트{i}"} for i, text in enumerate(originals)])
+
+    side = gate_pipeline.train_side(raw, {}, val_fraction=0.3)
+
+    validation = {line_key(text) for text in originals if is_validation(text, 0.3)}
+    assert validation and side.usable == frozenset(line_key(text) for text in originals) - validation
+
+
+def test_a_line_that_is_translated_once_is_not_pending(write_jsonl):
+    raw = write_jsonl("raw.jsonl", [{"original": "ありがとう", "translated": None}, {"original": "ありがとう", "translated": "고마워"}])
+
+    side = gate_pipeline.train_side(raw, {}, val_fraction=0.0)
+
+    assert side.pending == frozenset() and side.usable == frozenset({line_key("ありがとう")})
+    on_the_validation_side = gate_pipeline.train_side(raw, {}, val_fraction=0.999)
+    assert on_the_validation_side.usable == frozenset() and on_the_validation_side.pending == frozenset()
+
+
+def test_the_overview_counts_each_category_with_its_natural_share_and_pending_lines(write_jsonl):
+    raw = write_jsonl("raw.jsonl", [
+        *[{"original": f"挨拶{i}", "translated": f"인사{i}"} for i in range(3)],
+        {"original": "挨拶まだ", "translated": None},
+        {"original": "雑談", "translated": "잡담"},
+    ])
+    categories = {**{line_key(f"挨拶{i}"): "social/greeting" for i in range(3)}, line_key("挨拶まだ"): "social/greeting"}
+
+    rows = {row["category"]: row for row in gate_pipeline.category_overview(gate_pipeline.train_side(raw, categories, val_fraction=0.0))}
+
+    assert rows["social/greeting"] == {"category": "social/greeting", "lines": 4, "usable": 3, "natural": pytest.approx(0.75), "pending": 1}
+    assert rows["uncategorized"]["usable"] == 1 and rows["uncategorized"]["natural"] == pytest.approx(0.25)
+
+
+def test_the_training_side_preview_selects_exactly_what_preprocess_selects(write_jsonl, tmp_path):
+    import preprocess
+
+    rows = [{"original": f"挨拶{i}", "translated": f"인사{i}"} for i in range(30)] + \
+           [{"original": f"募集{i}", "translated": f"모집{i}"} for i in range(9)] + \
+           [{"original": f"雑談{i}", "translated": f"잡담{i}"} for i in range(12)] + \
+           [{"original": "ID:1 " + "あ" * 150 + " ID:2", "translated": "모집 벽"}]  # a recruitment wall: kept by the recipe
+    raw = write_jsonl("raw.jsonl", rows)
+    categories = {**{line_key(f"挨拶{i}"): "social" for i in range(30)}, **{line_key(f"募集{i}"): "recruitment/party" for i in range(9)},
+                  line_key(rows[-1]["original"]): "spam/wall"}
+    chosen = Recipe(seed=3, total=None, keep=("recruitment spam",),
+                    weights={"social": Fraction(2), "recruitment": Fraction(1), "uncategorized": Fraction(1), "spam": Fraction(1, 10)})
+    report = {}
+    preprocess.transform_for_lora(raw, str(tmp_path / "out.jsonl"), fmt="pair", val_file=str(tmp_path / "val.jsonl"), val_fraction=0.2,
+                                  recipe=chosen, categories=categories, recipe_report=report)
+
+    preview = gate_pipeline.train_side_preview(chosen, gate_pipeline.train_side(raw, categories, val_fraction=0.2, keep=chosen.keep))
+
+    assert {row["key"]: row["target"] for row in preview["rows"]} == report["targets"]
+    assert {row["key"]: row["available"] for row in preview["rows"]} == report["available"]
+    assert (preview["total"], preview["limited_by"]) == (report["total"], report["limited_by"])
+
+
+def test_the_preview_refuses_lines_read_with_another_keep_than_the_recipes(write_jsonl):
+    raw = write_jsonl("raw.jsonl", [{"original": "おはよう", "translated": "좋은 아침"}])
+    side = gate_pipeline.train_side(raw, {}, val_fraction=0.0)
+
+    with pytest.raises(RecipeError, match="recruitment spam"):
+        gate_pipeline.train_side_preview(Recipe(seed=1, total=None, keep=("recruitment spam",), weights={"social": Fraction(1)}), side)
+
+
+def test_the_training_side_preview_is_text_with_the_limit_and_what_falls_outside(write_jsonl):
+    raw = write_jsonl("raw.jsonl", raw_rows(**{"挨拶": "인사", "雑談": "잡담", "募集": "모집"}))
+    side = gate_pipeline.train_side(raw, {line_key("挨拶"): "social", line_key("雑談"): "chat"}, val_fraction=0.0)
+
+    preview = gate_pipeline.train_side_preview(recipe(social=1, chat=1), side)
+    text = gate_pipeline.format_train_side_preview(preview, "my-mix")
+
+    assert preview["outside"] == 1 and preview["usable"] == 3
+    assert "my-mix" in text and "would select 2" in text and "1 usable line is in a category the recipe does not name" in text
+    overview = gate_pipeline.format_category_overview(gate_pipeline.category_overview(side))
+    assert "social" in overview and "pending" in overview
+
+
+def test_a_recipe_that_selects_nothing_says_which_category_has_no_lines(write_jsonl):
+    """preprocess.py stops on such a recipe; the notebook should say why before anyone runs it."""
+    raw = write_jsonl("raw.jsonl", raw_rows(**{"挨拶": "인사"}))
+    side = gate_pipeline.train_side(raw, {line_key("挨拶"): "social"}, val_fraction=0.0)
+
+    text = gate_pipeline.format_train_side_preview(gate_pipeline.train_side_preview(recipe(social=1, game=1), side), "my-mix")
+
+    assert "selects nothing" in text and "'game' has no usable lines" in text
+
+
+# --- choosing and saving a recipe ----------------------------------------------------------------------------------
+
+
+def test_a_chosen_mix_is_a_checked_recipe():
+    mapping, chosen = gate_pipeline.choose_recipe({"social": 2, "chat/casual": 1.5}, seed=7, total=100, keep=["recruitment spam"],
+                                                  description="mix A")
+
+    assert mapping == {"description": "mix A", "seed": 7, "total": 100, "keep": ["recruitment spam"],
+                       "categories": {"social": {"weight": 2}, "chat/casual": {"weight": 1.5}}}
+    assert chosen.weights == {"social": Fraction(2), "chat/casual": Fraction(3, 2)} and chosen.keep == ("recruitment spam",)
+
+
+def test_a_mix_with_a_bad_weight_or_category_is_refused_with_the_reason():
+    with pytest.raises(RecipeError, match="weight must be a number above 0"):
+        gate_pipeline.choose_recipe({"social": 0})
+    with pytest.raises(RecipeError, match="lower-case path"):
+        gate_pipeline.choose_recipe({"Social": 1})
+
+
+def test_a_saved_recipe_reads_back_as_the_same_recipe_with_lf_line_endings(tmp_path):
+    mapping, chosen = gate_pipeline.choose_recipe({"social": 1, "game": 3}, description="게임 위주")
+
+    path = gate_pipeline.save_recipe("game-heavy", mapping, directory=str(tmp_path))
+
+    from dataset_recipe import load_recipe
+    assert path == str(tmp_path / "game-heavy.json")
+    assert load_recipe(path)[0] == chosen
+    data = (tmp_path / "game-heavy.json").read_bytes()
+    assert b"\r" not in data and data.endswith(b"\n") and "게임 위주".encode() in data
+
+
+def test_saving_never_replaces_a_recipe_unless_asked(tmp_path):
+    mapping, _ = gate_pipeline.choose_recipe({"social": 1})
+    gate_pipeline.save_recipe("mine", mapping, directory=str(tmp_path))
+    other, _ = gate_pipeline.choose_recipe({"chat": 1})
+
+    with pytest.raises(RecipeError, match="already exists"):
+        gate_pipeline.save_recipe("mine", other, directory=str(tmp_path))
+    gate_pipeline.save_recipe("mine", other, directory=str(tmp_path), overwrite=True)
+    assert json.loads((tmp_path / "mine.json").read_text(encoding="utf-8"))["categories"] == {"chat": {"weight": 1}}
+
+
+def test_a_recipe_name_that_is_not_a_file_name_is_refused(tmp_path):
+    mapping, _ = gate_pipeline.choose_recipe({"social": 1})
+
+    with pytest.raises(RecipeError, match="not a recipe name"):
+        gate_pipeline.save_recipe("../escape", mapping, directory=str(tmp_path))
+
+
 # --- the decision text -----------------------------------------------------------------------------------
 
 
