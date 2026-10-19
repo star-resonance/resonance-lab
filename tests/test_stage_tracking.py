@@ -241,3 +241,12 @@ def test_tracking_off_by_the_environment_gives_a_tracker_that_does_nothing(monke
     t = stage_tracking.open_tracker(log=lambda *a: None)
 
     assert t.enabled is False and t.resume("x") is False
+
+
+def test_the_curves_file_ends_lines_with_lf_on_every_os(tmp_path):
+    train_yaml, manifest = _training_files(tmp_path)
+
+    stage_tracking.finish_training(Recorder(), str(tmp_path), "FINISHED", train_yaml=train_yaml, manifest_file=manifest)
+
+    data = (tmp_path / "curves.jsonl").read_bytes()
+    assert data.count(b"\n") == 1 and b"\r" not in data
