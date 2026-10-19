@@ -70,7 +70,7 @@ def categorise_raw(raw_path, out_path):
     """Write the categories file for the raw log; returns (lines per root, uncategorized lines, damaged rows)."""
     per_root, uncategorized, stats = {}, 0, {}
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
-    with open(out_path, "w", encoding="utf-8") as out:
+    with open(out_path, "w", encoding="utf-8", newline="\n") as out:  # LF on every OS: a recipe records its sha256
         for key, original, _ in distinct_lines(raw_path, stats):
             category = categorize(original)
             if category is None:
