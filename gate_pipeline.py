@@ -13,7 +13,8 @@ import sys
 from typing import NamedTuple
 
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
-from dataset_recipe import UNCATEGORIZED, RecipeError, line_key, line_rank, load_recipe, recipe_path, select_lines
+from config import RECIPE_DIR
+from dataset_recipe import DEFAULT_SEED, UNCATEGORIZED, RecipeError, line_key, line_rank, load_recipe, parse_recipe, recipe_path, select_lines
 from overlap import EvalOverlap
 from preprocess import PAIR_VAL_FRACTION, row_outcomes
 from valsplit import is_validation
@@ -205,6 +206,29 @@ def format_train_side_preview(preview, name):
     lines.append(f"  {outside:,} usable line{'' if outside == 1 else 's'} {'is' if outside == 1 else 'are'} in a category the recipe does not name"
                  " (left out).")
     return "\n".join(lines)
+
+
+# --- choosing and saving a recipe -----------------------------------------------------------------------------------
+
+
+def choose_recipe(weights, seed=DEFAULT_SEED, total=None, keep=(), description=None):
+    """(mapping, Recipe) of a mix chosen as {category: weight}: the mapping is the recipe file's content, checked by parse_recipe
+    (a RecipeError says what is wrong)."""
+    mapping = {**({"description": description} if description is not None else {}), "seed": seed, "total": total, "keep": list(keep),
+               "categories": {name: {"weight": weight} for name, weight in weights.items()}}
+    return mapping, parse_recipe(mapping)
+
+
+def save_recipe(name, mapping, directory=RECIPE_DIR, overwrite=False):
+    """Write `mapping` (checked again) as configs/datasets/<name>.json, UTF-8 with LF line endings; returns the path. An existing recipe
+    is replaced only with `overwrite`: a recipe's name and hash are in the manifest and MLflow of every run trained with it."""
+    parse_recipe(mapping)
+    path = recipe_path(name, directory)
+    if os.path.exists(path) and not overwrite:
+        raise RecipeError(f"{path} already exists: choose another name, or overwrite=True to replace it")
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(mapping, ensure_ascii=False, indent=2) + "\n")
+    return path
 
 
 # --- the decision ---------------------------------------------------------------------------------------
