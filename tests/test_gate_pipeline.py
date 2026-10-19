@@ -291,6 +291,16 @@ def test_the_training_side_preview_is_text_with_the_limit_and_what_falls_outside
     assert "social" in overview and "pending" in overview
 
 
+def test_a_recipe_that_selects_nothing_says_which_category_has_no_lines(write_jsonl):
+    """preprocess.py stops on such a recipe; the notebook should say why before anyone runs it."""
+    raw = write_jsonl("raw.jsonl", raw_rows(**{"挨拶": "인사"}))
+    side = gate_pipeline.train_side(raw, {line_key("挨拶"): "social"}, val_fraction=0.0)
+
+    text = gate_pipeline.format_train_side_preview(gate_pipeline.train_side_preview(recipe(social=1, game=1), side), "my-mix")
+
+    assert "selects nothing" in text and "'game' has no usable lines" in text
+
+
 # --- choosing and saving a recipe ----------------------------------------------------------------------------------
 
 
