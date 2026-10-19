@@ -38,7 +38,7 @@ def new_run_id(now=None):
 
 
 def _write_json(path, data):
-    with open(path, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 

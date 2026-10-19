@@ -224,8 +224,9 @@ def transform_for_lora(input_file, output_file, fmt=DEFAULT_FORMAT, style=None, 
 
     with contextlib.ExitStack() as files:
         f_in = files.enter_context(open(input_file, 'r', encoding='utf-8'))
-        f_out = files.enter_context(open(output_file, 'w', encoding='utf-8'))
-        f_val = files.enter_context(open(val_file, 'w', encoding='utf-8')) if val_file else None
+        # LF on every OS: the files' sha256 goes into the manifest and MLflow.
+        f_out = files.enter_context(open(output_file, 'w', encoding='utf-8', newline='\n'))
+        f_val = files.enter_context(open(val_file, 'w', encoding='utf-8', newline='\n')) if val_file else None
         for original, translated, reason in row_outcomes(f_in, eval_overlap, seen_inputs, keep):
             counts["total"] += 1
             if reason == "json error":

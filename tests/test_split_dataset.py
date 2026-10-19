@@ -42,3 +42,13 @@ def test_drops_empty_and_malformed_rows(write_jsonl, tmp_path):
     # A single row is never split off into val.
     assert read_jsonl(tmp_path / "out" / "train.jsonl") == [row(3)]
     assert read_jsonl(tmp_path / "out" / "val.jsonl") == []
+
+
+def test_train_and_val_end_lines_with_lf_on_every_os(write_jsonl, tmp_path):
+    src = write_jsonl("processed.jsonl", [row(i) for i in range(40)])
+
+    split_dataset.prepare_lora_dataset(src, str(tmp_path / "out"), val_split=0.05, seed=42)
+
+    for name in ("train.jsonl", "val.jsonl"):
+        data = (tmp_path / "out" / name).read_bytes()
+        assert b"\n" in data and b"\r" not in data, name

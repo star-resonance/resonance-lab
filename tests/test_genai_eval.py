@@ -173,3 +173,10 @@ def test_build_scorers_wraps_each_score_for_mlflow():
     assert registered["jp_leak"](**call) is True
     assert registered["exact_match"](**call) is False
     assert registered["chrf"](**call) < 100
+
+
+def test_predictions_end_lines_with_lf_on_every_os(tmp_path):
+    path = tmp_path / "p.jsonl"
+    genai_eval.write_predictions(str(path), genai_eval.prediction_rows(SAMPLES, ["안녕", "두목"], ["안녕", "두목"]))
+    data = path.read_bytes()
+    assert data.count(b"\n") == 2 and b"\r" not in data

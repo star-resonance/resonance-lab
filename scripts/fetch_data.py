@@ -76,7 +76,7 @@ def main(argv=None):
         except FetchError as e:
             print(f"[ERROR] {e}")
             sys.exit(1)
-        with open(HF_DATASET_CONFIG, "w", encoding="utf-8") as f:
+        with open(HF_DATASET_CONFIG, "w", encoding="utf-8", newline="\n") as f:  # a file in git (eol=lf)
             f.write(text)
         print(f"{message} -> {HF_DATASET_CONFIG}")
         return

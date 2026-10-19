@@ -409,3 +409,16 @@ def test_a_corrupt_old_file_is_set_aside_and_the_new_queue_starts_empty(tmp_path
 
 def test_without_a_legacy_path_nothing_is_migrated_so_a_test_queue_never_reads_the_real_one(tmp_path):
     assert RunQueue(str(tmp_path / "q.jsonl"), str(tmp_path / "f")).runs() == []
+
+
+def test_a_compacted_journal_ends_lines_with_lf_like_the_appended_ones(tmp_path):
+    path, files = tmp_path / "q.jsonl", str(tmp_path / "q.files")
+    first = RunQueue(str(path), files)
+    local = _new(first)
+    first.add_params(local, {"a": "1"})
+    first.mark_sent(local, 0)
+
+    RunQueue(str(path), files)  # opening it compacts: the sent event is dropped
+
+    data = path.read_bytes()
+    assert data.count(b"\n") == 1 and b"\r" not in data

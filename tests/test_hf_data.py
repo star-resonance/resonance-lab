@@ -382,3 +382,14 @@ def test_the_summary_names_the_merge_format_and_an_older_state_is_not_current(tm
     assert hf_data.is_current(state, CFG, str(out))
     del state["merge_format"]  # a raw log merged before rows carried their channel
     assert not hf_data.is_current(state, CFG, str(out))
+
+
+def test_the_fetch_state_and_a_pinned_config_end_lines_with_lf_on_every_os(stage, tmp_path, monkeypatch):
+    path = tmp_path / "fetch_state.json"
+    hf_data.write_state(str(path), CFG, {"rows": 3, "files": {"dataset_A.jsonl": "x"}, "raw_sha256": "y"})
+    monkeypatch.setattr(fetch_data, "latest_revision", lambda repo: "d" * 40)
+
+    fetch_data.main(["--pin"])  # rewrites the config, a file in git (eol=lf)
+
+    for data in (path.read_bytes(), stage.cfg.read_bytes()):
+        assert b"\n" in data and b"\r" not in data

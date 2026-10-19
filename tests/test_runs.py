@@ -140,3 +140,10 @@ def test_the_merge_record_of_a_legacy_adapter_has_no_run(tmp_path):
     path = runs.write_merge_record(str(merged), "p", str(legacy))
 
     assert json.loads(open(path, encoding="utf-8").read())["run"] is None
+
+
+def test_run_json_ends_lines_with_lf_on_every_os(tmp_path):
+    run = runs.start_run(str(tmp_path), "p", now=T0)
+    runs.finish_run(run.dir, "complete")
+    data = open(os.path.join(run.dir, runs.RUN_FILE), "rb").read()
+    assert b"\n" in data and b"\r" not in data

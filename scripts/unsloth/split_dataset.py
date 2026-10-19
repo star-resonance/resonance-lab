@@ -65,7 +65,7 @@ def prepare_lora_dataset(input_path, output_dir, val_split=0.05, seed=42):
     # Save to JSONL
     def save_jsonl(data, filename):
         path = os.path.join(output_dir, filename)
-        with open(path, 'w', encoding='utf-8') as f:
+        with open(path, 'w', encoding='utf-8', newline='\n') as f:
             for entry in data:
                 f.write(json.dumps(entry, ensure_ascii=False) + '\n')
         return path

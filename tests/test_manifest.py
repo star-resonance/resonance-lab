@@ -163,3 +163,9 @@ def test_a_recipe_block_is_recorded_only_when_there_is_one(tmp_path):
 
     assert "recipe" not in plain
     assert with_recipe["recipe"] == {"name": "balanced", "sha256": "abc"}
+
+
+def test_the_manifest_ends_lines_with_lf_on_every_os(tmp_path):
+    _, path = _write(tmp_path)
+    data = open(path, "rb").read()
+    assert b"\n" in data and b"\r" not in data

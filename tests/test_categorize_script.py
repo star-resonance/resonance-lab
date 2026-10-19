@@ -60,6 +60,17 @@ def test_the_output_folder_is_created(write_jsonl, tmp_path):
     assert out.exists()
 
 
+def test_the_categories_file_ends_lines_with_lf_on_every_os(write_jsonl, tmp_path):
+    # A recipe records its sha256 (categories_sha256): a CRLF file on Windows would hash differently from Linux.
+    raw = write_jsonl("raw.jsonl", [{"original": "杖@2募集", "translated": "법사@2 모집"}, {"original": "おはよう", "translated": "안녕"}])
+    out = tmp_path / "categories.jsonl"
+
+    run(["--raw", raw, "--out", str(out)])
+
+    data = out.read_bytes()
+    assert data.count(b"\n") == 2 and b"\r" not in data
+
+
 def test_a_missing_raw_log_stops_with_a_message(tmp_path, capsys):
     with pytest.raises(SystemExit) as stopped:
         run(["--raw", str(tmp_path / "missing.jsonl"), "--out", str(tmp_path / "c.jsonl")])
