@@ -291,6 +291,55 @@ def test_the_training_side_preview_is_text_with_the_limit_and_what_falls_outside
     assert "social" in overview and "pending" in overview
 
 
+# --- choosing and saving a recipe ----------------------------------------------------------------------------------
+
+
+def test_a_chosen_mix_is_a_checked_recipe():
+    mapping, chosen = gate_pipeline.choose_recipe({"social": 2, "chat/casual": 1.5}, seed=7, total=100, keep=["recruitment spam"],
+                                                  description="mix A")
+
+    assert mapping == {"description": "mix A", "seed": 7, "total": 100, "keep": ["recruitment spam"],
+                       "categories": {"social": {"weight": 2}, "chat/casual": {"weight": 1.5}}}
+    assert chosen.weights == {"social": Fraction(2), "chat/casual": Fraction(3, 2)} and chosen.keep == ("recruitment spam",)
+
+
+def test_a_mix_with_a_bad_weight_or_category_is_refused_with_the_reason():
+    with pytest.raises(RecipeError, match="weight must be a number above 0"):
+        gate_pipeline.choose_recipe({"social": 0})
+    with pytest.raises(RecipeError, match="lower-case path"):
+        gate_pipeline.choose_recipe({"Social": 1})
+
+
+def test_a_saved_recipe_reads_back_as_the_same_recipe_with_lf_line_endings(tmp_path):
+    mapping, chosen = gate_pipeline.choose_recipe({"social": 1, "game": 3}, description="게임 위주")
+
+    path = gate_pipeline.save_recipe("game-heavy", mapping, directory=str(tmp_path))
+
+    from dataset_recipe import load_recipe
+    assert path == str(tmp_path / "game-heavy.json")
+    assert load_recipe(path)[0] == chosen
+    data = (tmp_path / "game-heavy.json").read_bytes()
+    assert b"\r" not in data and data.endswith(b"\n") and "게임 위주".encode() in data
+
+
+def test_saving_never_replaces_a_recipe_unless_asked(tmp_path):
+    mapping, _ = gate_pipeline.choose_recipe({"social": 1})
+    gate_pipeline.save_recipe("mine", mapping, directory=str(tmp_path))
+    other, _ = gate_pipeline.choose_recipe({"chat": 1})
+
+    with pytest.raises(RecipeError, match="already exists"):
+        gate_pipeline.save_recipe("mine", other, directory=str(tmp_path))
+    gate_pipeline.save_recipe("mine", other, directory=str(tmp_path), overwrite=True)
+    assert json.loads((tmp_path / "mine.json").read_text(encoding="utf-8"))["categories"] == {"chat": {"weight": 1}}
+
+
+def test_a_recipe_name_that_is_not_a_file_name_is_refused(tmp_path):
+    mapping, _ = gate_pipeline.choose_recipe({"social": 1})
+
+    with pytest.raises(RecipeError, match="not a recipe name"):
+        gate_pipeline.save_recipe("../escape", mapping, directory=str(tmp_path))
+
+
 # --- the decision text -----------------------------------------------------------------------------------
 
 
