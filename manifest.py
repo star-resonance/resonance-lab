@@ -65,7 +65,7 @@ def write_manifest(data_path, fmt, style, reverse, raw_path, counts, eval_set, e
     if recipe:
         meta["recipe"] = recipe
     path = manifest_path(data_path)
-    with open(path, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
     return path
 

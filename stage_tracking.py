@@ -81,7 +81,7 @@ def _curves_file(log, curves, state):
     try:
         with open(log, encoding="utf-8") as f:
             lines = tracking.curve_lines(f.read().splitlines(), state)
-        with open(curves, "w", encoding="utf-8") as f:
+        with open(curves, "w", encoding="utf-8", newline="\n") as f:
             f.write("".join(line + "\n" for line in lines))
         return curves
     except OSError:

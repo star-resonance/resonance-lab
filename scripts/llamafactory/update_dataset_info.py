@@ -16,7 +16,7 @@ def main(argv=None):
         print(f"[ERROR] {e}")
         sys.exit(1)
     info = dataset_info_for_processed_logs()
-    with open(LF_DATASET_INFO_PATH, "w", encoding="utf-8") as f:
+    with open(LF_DATASET_INFO_PATH, "w", encoding="utf-8", newline="\n") as f:
         json.dump(info, f, ensure_ascii=False, indent=2)
     print(f"dataset_info.json written -> {LF_DATASET_INFO_PATH}")
     for name, entry in info.items():

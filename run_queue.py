@@ -193,7 +193,7 @@ class RunQueue:
             directory = os.path.dirname(self.path)
             if directory:
                 os.makedirs(directory, exist_ok=True)
-            with open(temp, "w", encoding="utf-8") as f:
+            with open(temp, "w", encoding="utf-8", newline="\n") as f:  # LF, like the lines _append writes as bytes
                 f.write("".join(json.dumps(line, ensure_ascii=False, separators=(",", ":")) + "\n" for line in lines))
                 f.flush()
                 os.fsync(f.fileno())

@@ -95,7 +95,7 @@ def write_state(path, cfg, merged):
     state = {"repo": cfg["repo"], "revision": cfg["revision"], "include": cfg["include"], **merged,
              "fetched": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 

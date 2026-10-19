@@ -36,7 +36,7 @@ def predictions_path(directory, profile_name, prompt_mode):
 
 def write_predictions(path, rows):
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
